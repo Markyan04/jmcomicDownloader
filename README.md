@@ -1,6 +1,6 @@
 # JMComic Downloader
 
-轻量的 JM 下载管理工具，支持固定账号登录、任务队列、下载进度、历史记录、失败重试，以及整本 PDF 合并。基于 Flask、SQLite 和 [jmcomic](https://github.com/hect0x7/JMComic-Crawler-Python)，单容器运行，无需额外数据库或前端构建。
+轻量的 JM 下载管理工具，支持固定账号登录、任务队列、下载进度、历史记录、失败重试、整本 PDF 合并和在线阅读。基于 Flask、SQLite 和 [jmcomic](https://github.com/hect0x7/JMComic-Crawler-Python)，单容器运行，无需额外数据库或前端构建。
 
 ## Docker Compose 部署
 
@@ -24,7 +24,45 @@ DOWNLOAD_DIR=/path/to/downloads
 
 `data/` 保存任务数据库和会话密钥，必须位于本机磁盘。配置、数据库、图片和 PDF 均不写入镜像。容器按 `.env` 中的 UID/GID 运行，使用只读根文件系统与轮转日志。
 
-默认只监听回环地址；对外提供服务时使用 HTTPS 反向代理，并启用安全 Cookie。应用不提供在线预览或图片 / PDF 访问接口。
+默认只监听回环地址；对外提供服务时使用 HTTPS 反向代理，并启用安全 Cookie。书库、阅读器和 PDF 数据接口都需要登录。
+
+## 从第一版升级
+
+在原部署目录更新源码后，直接重新构建并替换容器：
+
+```sh
+git pull --ff-only
+docker compose up -d --build --wait --wait-timeout 90
+```
+
+使用源码压缩包部署的用户，解压新版后只覆盖应用源码、Dockerfile 和依赖文件，保留原来的 `config.toml`、`.env`、`compose.yaml`、`data/` 和下载目录，然后执行同一条 Compose 命令。容器内没有新增系统依赖或服务，已有 Compose 文件可以继续使用。升级前可按下文维护说明备份；无需初始化、清空数据库、迁移下载目录或重新下载资源。
+
+新版在顶部增加“本地书库”入口，直接读取原来挂载的下载目录。任务数据库结构和下载状态机保持不变；升级重启时，正在执行的任务仍按原规则标为失败，需手动重试。建议等当前下载完成后升级。
+
+## 本地书库与在线阅读
+
+书库以 `download.directory`（Docker 内为 `/downloads`）为根目录，按当前目录分页显示子目录和 `.pdf` 文件，点击文件进入阅读器。第一版生成的旧目录、任意层级的现有 PDF、手动复制到下载目录的 PDF 都可直接读取，**不依赖下载任务记录**。添加文件后刷新书库即可；不会建立另一套索引或修改文件。只有图片、尚无 PDF 的目录暂不提供在线阅读，也不会自动转换历史图片。
+
+阅读器使用随应用打包的 Mozilla PDF.js，支持上一页 / 下一页、页码跳转、左右方向键和缩放。通过 HTTP Range 分段读取，当前页准备好即可显示，随后持续在后台加载剩余内容，**停留在同一页也会继续缓存，直到整本加载完成**。阅读器显示整体缓存进度，已加载的数据在当前阅读会话中供翻页复用；离开阅读器会停止加载，重新打开会建立新的阅读会话，不提供持久离线缓存。
+
+数据加载与页面绘制独立：后台缓存整本 PDF 的压缩数据，只渲染当前页，避免把整本漫画解码为图片驻留内存；浏览器仍需要容纳 PDF 文件数据的内存。首次显示需要 PDF 的结构信息和当前页数据，具体读取量取决于 PDF；很小的 PDF 或结构特殊的文件可能需要读取全部数据。这里的“边加载边看”指已生成 PDF 的网络加载过程，不包含还在生成的半成品。
+
+浏览仅开放根目录内的普通目录和 PDF；隐藏文件、符号链接及目录穿越均拒绝访问，不支持任意外部 URL。PDF 接口保留登录校验、禁止公共缓存，并支持 `HEAD`、`206 Partial Content`、`416` 和文件版本校验。阅读期间文件被替换时会提示刷新。
+
+反向代理需要转发 `Range` / `If-Range`，保留 `Content-Length`、`Content-Range`、`Accept-Ranges`、`ETag`，不要对 `/api/library/file` 强制压缩、整文件缓冲或公共缓存。例如 Nginx 在现有代理配置中可添加（`app_backend` 替换为自己的上游名称）：
+
+```nginx
+location = /api/library/file {
+    proxy_pass http://app_backend;
+    proxy_set_header Range $http_range;
+    proxy_set_header If-Range $http_if_range;
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+}
+```
+
+无需将 PDF 线性化或重新生成，正常的已有 PDF 即可按范围读取。PDF.js 的脚本、Worker、字体及解码资源均由容器提供，阅读时不依赖外部 CDN。
 
 ## 应用配置
 
@@ -138,4 +176,4 @@ python3 scripts/setup.py
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。`jmcomic` 的许可证和维护归其上游项目所有。
+本项目使用 [MIT License](LICENSE)。`jmcomic` 的许可证和维护归其上游项目所有。在线阅读使用 Mozilla PDF.js（Apache-2.0），随附资源的许可证保留在 [vendor/pdfjs](app/static/vendor/pdfjs/) 及其子目录中。

@@ -11,6 +11,7 @@ from datetime import timedelta
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 from .config import Settings, load_settings
+from .library import library
 from .store import Store
 
 
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None):
     store = Store(settings.data / "tasks.sqlite3")
     app.extensions["store"] = store
     app.extensions["settings"] = settings
+    app.register_blueprint(library)
     # Password changes invalidate existing sessions without needing a user database.
     identity = hashlib.sha256(f"{settings.username}\0{settings.password}".encode()).hexdigest()
     attempts = OrderedDict()
@@ -53,6 +55,8 @@ def create_app(settings: Settings | None = None):
             return None
         if request.path.startswith("/api/") and session.get("identity") != identity:
             return jsonify(error="请先登录"), 401
+        if request.blueprint == "library" and session.get("identity") != identity:
+            return redirect(url_for("login"))
         if request.method == "POST":
             expected = session.get("csrf", "")
             supplied = request.headers.get("X-CSRF-Token") or request.form.get("csrf", "")
@@ -63,7 +67,9 @@ def create_app(settings: Settings | None = None):
 
     @app.after_request
     def headers(response):
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = (
+            "public, max-age=0, must-revalidate" if request.endpoint == "static" else "no-store"
+        )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
@@ -71,6 +77,14 @@ def create_app(settings: Settings | None = None):
             "default-src 'self'; script-src 'self'; style-src 'self'; "
             "img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
+        if (request.endpoint == "library.reader" or
+                (request.endpoint == "static" and request.view_args.get("filename") == "vendor/pdfjs/pdf.worker.min.mjs")):
+            # PDF.js runs a same-origin Worker and can use bundled WASM image decoders.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; "
+                "worker-src 'self'; font-src 'self' blob:; img-src 'self' data: blob:; "
+                "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+            )
         return response
 
     @app.get("/health")

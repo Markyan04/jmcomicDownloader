@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='reader.js') }}"></script>{% endblock %}
+{% block content %}
+<main class="reader" data-reader data-file-url="{{ file_url }}">
+  <header class="reader-header"><a class="secondary" href="{{ back_url }}">← 返回书库</a><h1>{{ name }}</h1><a class="secondary" id="reader-reload" href="">重新加载</a></header>
+  <nav class="reader-toolbar" aria-label="阅读控制">
+    <button id="pdf-previous" class="secondary" type="button" disabled>上一页</button>
+    <form id="pdf-jump"><label class="sr-only" for="pdf-page">页码</label><input id="pdf-page" type="number" min="1" value="1" inputmode="numeric" disabled><span id="pdf-total">/ —</span><button class="secondary" type="submit" disabled>跳转</button></form>
+    <button id="pdf-next" class="secondary" type="button" disabled>下一页</button>
+    <label class="zoom-control">缩放 <select id="pdf-zoom" disabled><option value="1">适合宽度</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option></select></label>
+  </nav>
+  <div class="reader-status"><span id="pdf-status" role="status">正在打开 PDF…</span><span id="pdf-transfer" class="muted"></span></div>
+  <progress id="pdf-buffer" class="pdf-buffer" max="1" value="0" aria-label="整本 PDF 缓存进度"></progress>
+  <div id="pdf-stage" class="pdf-stage" aria-busy="true"><canvas id="pdf-canvas" hidden aria-label="PDF 当前页"></canvas></div>
+  <p class="reader-help muted">使用左右方向键翻页。页面准备好即可阅读，剩余内容会持续在后台缓存。</p>
+</main>
+{% endblock %}

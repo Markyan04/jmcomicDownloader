@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block scripts %}<script src="{{ url_for('static', filename='library.js') }}" defer></script>{% endblock %}
+{% block content %}
+<div class="app-shell">
+  <header class="topbar"><a class="brand" href="/">JM <span class="brand-light">/ 本地书库</span></a><a class="secondary" href="/">返回下载工作台</a></header>
+  <main class="dashboard" data-library>
+    <div class="page-heading"><div><h1>本地书库<span class="heading-dot">.</span></h1><p class="muted">按目录浏览已有 PDF，边看边缓存剩余内容。</p></div><button class="secondary" id="library-refresh" type="button">刷新目录</button></div>
+    <nav id="breadcrumbs" class="breadcrumbs" aria-label="当前位置"></nav>
+    <section class="history" aria-label="目录内容">
+      <p id="library-status" class="library-status muted" role="status">正在读取目录…</p>
+      <div id="library-entries"></div>
+      <div class="pagination" id="library-pagination" hidden><button id="library-previous" class="secondary" type="button">上一页</button><span id="library-page" class="muted"></span><button id="library-next" class="secondary" type="button">下一页</button></div>
+    </section>
+    <p class="input-hint">书库直接读取下载目录，与任务记录独立。只有图片的目录需先生成 PDF 才能阅读。</p>
+  </main>
+</div>
+{% endblock %}

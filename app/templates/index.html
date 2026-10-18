@@ -3,7 +3,7 @@
 <div class="app-shell" data-dashboard data-mode="{{ mode }}">
   <header class="topbar">
     <a class="brand" href="/"><span class="brand-icon">J<span>M</span></span><span>JM <span class="brand-light">/ 下载小工具</span></span></a>
-    <div class="account"><span class="avatar" aria-hidden="true">{{ username[0]|upper }}</span><span>{{ username }}</span><span class="account-divider"></span>
+    <div class="account"><a class="secondary" href="{{ url_for('library.index') }}">本地书库</a><span class="avatar" aria-hidden="true">{{ username[0]|upper }}</span><span>{{ username }}</span><span class="account-divider"></span>
       <form action="/logout" method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="text-button" type="submit">退出登录</button></form>
     </div>
   </header>
