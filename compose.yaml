@@ -1,0 +1,56 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.12-slim}"
+    init: true
+    restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3011}:8000"
+    environment:
+      JM_CONFIG: /app/config.toml
+      JM_DATA: /app/data
+      JM_DOWNLOADS: /downloads
+      JM_HOST: 0.0.0.0
+      JM_PORT: "8000"
+      JM_MODE: "${JM_MODE:-real}"
+      JM_SECURE_COOKIE: "${JM_SECURE_COOKIE:-}"
+    volumes:
+      - type: bind
+        source: ./config.toml
+        target: /app/config.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${DOWNLOAD_DIR:-./downloads}"
+        target: /downloads
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

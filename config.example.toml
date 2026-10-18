@@ -1,0 +1,17 @@
+[auth]
+username = "admin"
+password = "CHANGE-ME-SET-YOUR-OWN-PASSWORD" # 至少 12 个字符；可用 scripts/setup.py 生成
+secure_cookie = false # 正式 HTTPS 入口改为 true
+
+[download]
+mode = "real"
+directory = "downloads"
+require_nfs = false
+proxy = "" # 留空表示直连；容器内不要填宿主机的 127.0.0.1
+min_free_mb = 256
+export_pdf = true # 整本合并为 PDF，同时保留原图
+
+[app]
+data_directory = "data"
+host = "127.0.0.1"
+port = 3011

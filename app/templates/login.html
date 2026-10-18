@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="login-layout">
+  <div class="login-intro">
+    <a class="brand" href="/"><span class="brand-icon">J<span>M</span></span><span>JM <span class="brand-light">/ 下载小工具</span></span></a>
+    <div class="intro-content">
+      <span class="eyebrow">YOUR SMALL DOWNLOAD CORNER</span>
+      <h1>想存下的，<br>交给这里。</h1>
+      <p>输入一个编号，剩下的慢慢来。<br>排队、下载、保存，一眼就知道。</p>
+      <div class="intro-steps"><span>01 · 加入队列</span><i></i><span>02 · 自动下载</span><i></i><span>03 · 保存到位</span></div>
+    </div>
+    <span class="login-footnote">一个简单的私人下载面板。</span>
+  </div>
+  <section class="login-card" aria-labelledby="login-title">
+    <span class="eyebrow">WELCOME BACK</span>
+    <h2 id="login-title">登录你的面板</h2>
+    <p class="muted">使用配置文件中设置的账号和密码。</p>
+    <form method="post" action="/login" class="login-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <label for="username">账号</label>
+      <input id="username" name="username" autocomplete="username" maxlength="100" required placeholder="输入账号" autofocus>
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="512" required placeholder="输入密码">
+      {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+      <button class="primary" type="submit">登录面板 <span aria-hidden="true">↗</span></button>
+    </form>
+    <p class="login-note">私人使用 · 无需注册</p>
+  </section>
+</main>
+{% endblock %}
