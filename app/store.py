@@ -26,11 +26,14 @@ class Store:
                     message TEXT NOT NULL DEFAULT '等待下载',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    output TEXT NOT NULL DEFAULT ''
+                    output TEXT NOT NULL DEFAULT '',
+                    delete_requested INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS one_active_album
                 ON tasks(jm_id, mode) WHERE status IN ('queued', 'downloading');
             """)
+            if "delete_requested" not in {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}:
+                db.execute("ALTER TABLE tasks ADD COLUMN delete_requested INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connect(self):
@@ -45,12 +48,14 @@ class Store:
     def recover(self):
         with self.connect() as db:
             db.execute("""UPDATE tasks SET status='failed', message=?, updated_at=?
-                          WHERE status='downloading'""",
+                          WHERE status='downloading' AND delete_requested=0""",
                        ("应用重启，下载已中断，请手动重试", now()))
 
     def enqueue(self, jm_id, mode):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM tasks WHERE jm_id=? AND delete_requested=1", (jm_id,)).fetchone():
+                raise ValueError("这个编号的资源正在清理，请稍后再提交")
             existing = db.execute("""SELECT id FROM tasks WHERE jm_id=? AND mode=?
                                   AND status IN ('queued','downloading')""", (jm_id, mode)).fetchone()
             if existing:
@@ -72,7 +77,7 @@ class Store:
     def claim(self, mode):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM tasks WHERE status='queued' AND mode=? ORDER BY updated_at,id LIMIT 1",
+            row = db.execute("SELECT * FROM tasks WHERE status='queued' AND delete_requested=0 AND mode=? ORDER BY updated_at,id LIMIT 1",
                              (mode,)).fetchone()
             if row is None:
                 return None
@@ -95,14 +100,50 @@ class Store:
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if row is None:
                 raise LookupError("任务不存在")
-            if row["status"] != "failed" or row["mode"] != mode:
+            if row["status"] != "failed" or row["mode"] != mode or row["delete_requested"]:
                 raise ValueError("只能重试当前模式的失败任务")
+            if db.execute("SELECT 1 FROM tasks WHERE jm_id=? AND delete_requested=1", (row["jm_id"],)).fetchone():
+                raise ValueError("这个编号的资源正在清理，请稍后重试")
             active = db.execute("""SELECT id FROM tasks WHERE jm_id=? AND mode=?
                                 AND status IN ('queued','downloading')""", (row["jm_id"], mode)).fetchone()
             if active:
                 raise ValueError("这个编号已有活动任务，请等待该任务结束")
             db.execute("""UPDATE tasks SET status='queued',done=0,total=0,message='等待重试',
-                          output='',updated_at=? WHERE id=?""", (now(), task_id))
+                          updated_at=? WHERE id=?""", (now(), task_id))
+
+    def get(self, task_id):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            return dict(row) if row else None
+
+    def request_delete(self, task_id):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                raise LookupError("任务不存在")
+            if row["delete_requested"]:
+                return
+            conflict = db.execute("""SELECT 1 FROM tasks WHERE jm_id=? AND mode=? AND id<>?
+                                   AND (status IN ('queued','downloading') OR delete_requested=1)""",
+                                  (row["jm_id"], row["mode"], task_id)).fetchone()
+            if conflict:
+                raise ValueError("同编号还有其他活动任务，请先取消其他任务，再删除资源")
+            db.execute("UPDATE tasks SET delete_requested=1,updated_at=? WHERE id=?", (now(), task_id))
+
+    def next_delete(self):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM tasks WHERE delete_requested=1 ORDER BY updated_at,id LIMIT 1").fetchone()
+            return dict(row) if row else None
+
+    def finish_delete(self, task_id):
+        with self.connect() as db:
+            db.execute("DELETE FROM tasks WHERE id=? AND delete_requested=1", (task_id,))
+
+    def delete_failed(self, task_id):
+        with self.connect() as db:
+            db.execute("""UPDATE tasks SET status='failed',delete_requested=0,message=?,updated_at=? WHERE id=?""",
+                       ("资源清理失败，任务记录已保留；请检查存储、目录位置和权限后再次删除", now(), task_id))
 
     def list_tasks(self, before=None, limit=50):
         with self.connect() as db:

@@ -52,14 +52,16 @@ def check_storage(settings):
 
 def mock_download(task, settings, report, stop):
     total = 24
-    report(title=f"模拟任务 · JM{task['jm_id']}", total=total, message="正在模拟下载")
+    folder = settings.downloads / "_mock" / f"task-{task['id']}"
+    report(title=f"模拟任务 · JM{task['jm_id']}", total=total, message="正在模拟下载", output=str(folder))
     for done in range(1, total + 1):
         if stop.wait(0.18):
             raise DownloadError("应用停止，下载已中断，请手动重试")
         if task["jm_id"] == "999999" and task["attempt"] == 1 and done == 9:
             raise DownloadError("模拟网络错误：点击重试后，此任务会成功")
         report(done=done)
-    folder = settings.downloads / "_mock" / f"task-{task['id']}"
+    if stop.is_set():
+        raise DownloadError("下载已中断")
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "README.txt").write_text(f"模拟任务 JM{task['jm_id']}，没有下载真实内容。\n", encoding="utf-8")
     return str(folder)
@@ -97,6 +99,7 @@ def real_download(task, settings, report, stop):
     client = option.build_jm_client()
     album = client.get_album_detail(task["jm_id"])
     folder = settings.downloads / book_directory_name(album.title, album.authors, task["jm_id"])
+    report(title=album.title, output=str(folder))
     option.dir_rule = jmcomic.DirRule("Bd / {Pid}", base_dir=str(folder))
     total = 0
     for chapter in album:

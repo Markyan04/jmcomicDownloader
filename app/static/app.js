@@ -1,3 +1,19 @@
+// The server enforces expiry. This only redirects an idle, fully cached reader.
+const remaining = document.querySelector('meta[name="session-seconds-remaining"]')?.content;
+if (remaining && Number.isFinite(Number(remaining))) {
+  const deadline = Date.now() + Number(remaining) * 1000;
+  let expiryTimer;
+  function checkExpiry() {
+    clearTimeout(expiryTimer);
+    const left = deadline - Date.now();
+    if (left <= 0) location.replace('/login');
+    else expiryTimer = setTimeout(checkExpiry, Math.min(left, 60000));
+  }
+  window.addEventListener('pageshow', checkExpiry);
+  document.addEventListener('visibilitychange', checkExpiry);
+  checkExpiry();
+}
+
 const dashboard = document.querySelector('[data-dashboard]');
 if (dashboard) {
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
@@ -44,7 +60,8 @@ if (dashboard) {
     main.append(info);
     const state = element('div', 'task-state');
     const stateTop = element('div', 'state-top');
-    const badge = element('span', `badge ${task.status}`, statuses[task.status]);
+    const cancelling = ['queued', 'downloading'].includes(task.status);
+    const badge = element('span', `badge ${task.status}`, task.delete_requested ? (cancelling ? '正在取消' : '正在删除') : statuses[task.status]);
     stateTop.append(badge);
     const percent = task.total ? Math.min(100, Math.floor(task.done / task.total * 100)) : 0;
     if (task.status === 'downloading') {
@@ -58,6 +75,7 @@ if (dashboard) {
     let description = task.message;
     if (task.status === 'downloading' && task.total && !task.message.startsWith('正在生成 PDF')) description = `${task.done} / ${task.total} 张`;
     if (task.status === 'completed' && task.total) description = `${task.total} ${task.output.endsWith('.pdf') ? '页 · PDF 已生成' : `张 · ${task.mode === 'mock' ? '模拟完成' : '已保存'}`}`;
+    if (task.delete_requested) description = '等待停止写入并清理目录，完成后自动移除记录';
     state.append(element('span', task.status === 'failed' ? 'task-detail failure-message' : 'task-detail', description));
     const time = element('time', 'task-time', new Date(task.created_at).toLocaleString('zh-CN', {
       month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -65,7 +83,7 @@ if (dashboard) {
     time.dateTime = task.created_at;
     time.title = new Date(task.created_at).toLocaleString('zh-CN');
     const actions = element('div', 'task-actions');
-    if (task.status === 'failed' && task.mode === dashboard.dataset.mode) {
+    if (!task.delete_requested && task.status === 'failed' && task.mode === dashboard.dataset.mode) {
       const retry = element('button', 'retry-button', '↻ 重试');
       retry.type = 'button';
       retry.setAttribute('aria-label', `重试 JM${task.jm_id}`);
@@ -76,7 +94,24 @@ if (dashboard) {
         finally { retry.disabled = false; }
       });
       actions.append(retry);
-    } else { actions.append(element('span', 'no-action', '—')); }
+    }
+    const remove = element('button', 'delete-button', task.delete_requested ? '处理中…' : cancelling ? '取消' : '删除');
+    remove.type = 'button';
+    remove.disabled = Boolean(task.delete_requested);
+    remove.setAttribute('aria-label', `${cancelling ? '取消' : '删除'} JM${task.jm_id}`);
+    remove.addEventListener('click', async () => {
+      const action = cancelling ? '取消' : '删除';
+      if (!confirm(`${action} JM${task.jm_id}？\n将永久删除任务记录、对应文件夹及其中全部图片和 PDF。\n同编号历史任务可能复用这些资源，此操作无法撤销。`)) return;
+      remove.disabled = true;
+      try {
+        const data = await api(`/api/tasks/${task.id}/delete`, {method: 'POST', body: '{}'});
+        notify(data.removed ? '任务和对应目录已删除' : '已请求取消，停止下载后将清理目录');
+        page = 0; cursors.splice(1);
+        await refresh();
+      } catch (error) { notify(error.message, true); }
+      finally { if (!task.delete_requested) remove.disabled = false; }
+    });
+    actions.append(remove);
     row.append(main, state, time, actions);
     return row;
   }

@@ -28,7 +28,8 @@ def create_app(settings: Settings | None = None):
     app.config.update(
         SECRET_KEY=secret_file.read_text().strip(), SESSION_COOKIE_NAME="jm_session",
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=settings.secure_cookie, PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+        SESSION_COOKIE_SECURE=settings.secure_cookie, PERMANENT_SESSION_LIFETIME=timedelta(hours=2),
+        SESSION_REFRESH_EACH_REQUEST=False,
         MAX_CONTENT_LENGTH=4096,
     )
     if len(app.secret_key) < 32:
@@ -48,11 +49,18 @@ def create_app(settings: Settings | None = None):
         return session["csrf"]
 
     app.jinja_env.globals["csrf_token"] = csrf
+    app.jinja_env.globals["session_seconds_remaining"] = lambda: (
+        max(0, session["expires_at"] - time.time()) if "expires_at" in session else ""
+    )
 
     @app.before_request
     def protect():
         if request.path == "/health":
             return None
+        if session.get("identity"):
+            expires = session.get("expires_at")
+            if not isinstance(expires, (int, float)) or time.time() >= expires:
+                session.clear()
         if request.path.startswith("/api/") and session.get("identity") != identity:
             return jsonify(error="请先登录"), 401
         if request.blueprint == "library" and session.get("identity") != identity:
@@ -136,6 +144,7 @@ def create_app(settings: Settings | None = None):
                 session.clear()
                 session.permanent = True
                 session["identity"] = identity
+                session["expires_at"] = time.time() + 2 * 60 * 60
                 csrf()
                 return redirect(url_for("index"))
             else:
@@ -172,7 +181,10 @@ def create_app(settings: Settings | None = None):
         match = re.fullmatch(r"(?:JM)?([0-9]{1,12})", value, flags=re.IGNORECASE)
         if not match or int(match[1]) == 0:
             return jsonify(error="请输入正整数 JM 号，例如 114514 或 JM114514"), 400
-        task_id, created = store.enqueue(str(int(match[1])), settings.mode)
+        try:
+            task_id, created = store.enqueue(str(int(match[1])), settings.mode)
+        except ValueError as error:
+            return jsonify(error=str(error)), 409
         worker = app.extensions.get("worker")
         if worker:
             worker.wake.set()
@@ -190,5 +202,18 @@ def create_app(settings: Settings | None = None):
         if worker:
             worker.wake.set()
         return jsonify(ok=True)
+
+    @app.post("/api/tasks/<int:task_id>/delete")
+    def delete_task(task_id):
+        worker = app.extensions.get("worker")
+        if not worker:
+            return jsonify(error="下载服务暂时不可用，请稍后重试"), 503
+        try:
+            removed = worker.request_delete(task_id)
+        except LookupError as error:
+            return jsonify(error=str(error)), 404
+        except ValueError as error:
+            return jsonify(error=str(error)), 409
+        return jsonify(ok=True, removed=removed), 200 if removed else 202
 
     return app
